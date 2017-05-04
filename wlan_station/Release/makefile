@@ -145,7 +145,7 @@ BIN_OUTPUTS__QUOTED += \
 all: wlan_station.out
 
 dependents:
-	-cd C:/Users/Teddy/git/WWU\ WIND\ FEED\ Repo/ti_rtos_config/Default && $(MAKE) clean all
+	-cd C:/Users/Teddy/git/WWU\ WIND\ FEED\ Repo/ti_rtos_config/Default && $(MAKE) all
 
 # Tool invocations
 wlan_station.out: $(OBJS) $(CMD_SRCS) $(GEN_CMDS) C:/Users/Teddy/git/WWU\ WIND\ FEED\ Repo/ti_rtos_config/Default/ti_rtos_config.lib
