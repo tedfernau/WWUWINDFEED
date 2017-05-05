@@ -66,13 +66,18 @@
 #include "hw_ints.h"
 #include "hw_types.h"
 #include "hw_memmap.h"
+#include "hw_common_reg.h"
+#include "hw_adc.h"
+#include "hw_gprcm.h"
 #include "interrupt.h"
 #include "utils.h"
 #include "pin.h"
+#include "pinmux.h"
 #include "uart.h"
 #include "rom.h"
 #include "rom_map.h"
 #include "prcm.h"
+#include "adc.h"
 
 //Free_rtos/ti-rtos includes
 #include "osi.h"
@@ -103,6 +108,8 @@
 #define ROLE_INVALID                    (-5)
 #define AUTO_CONNECTION_TIMEOUT_COUNT   (50)   /* 5 Sec */
 
+#define NO_OF_SAMPLES       128
+
 // Application specific status/error codes
 typedef enum{
     // Choosing -0x7D0 to avoid overlap w/ host-driver's error codes
@@ -127,6 +134,8 @@ unsigned char GET_token[]  = "__SL_G_ULD";
 int g_iSimplelinkRole = ROLE_INVALID;
 signed int g_uiIpAddress = 0;
 unsigned char g_ucSSID[AP_SSID_LEN_MAX];
+
+unsigned long pulAdcSamples[6];
 
 #if defined(ccs)
 extern void (* const g_pfnVectors[])(void);
@@ -1032,6 +1041,7 @@ static void HTTPServerTask(void *pvParameters)
     long lRetVal = -1;
     InitializeAppVariables();
 
+
     //
     // Following function configure the device to default state by cleaning
     // the persistent settings stored in NVMEM (viz. connection profiles &
@@ -1056,6 +1066,46 @@ static void HTTPServerTask(void *pvParameters)
   
     memset(g_ucSSID,'\0',AP_SSID_LEN_MAX);
     
+
+    /******************************************************************/
+    //    Read ADC and calculate voltage
+
+    // Pinmux for the selected ADC input pin
+    //
+    MAP_PinTypeADC(PIN_60,PIN_MODE_255);
+
+    //
+    // Configure ADC timer which is used to timestamp the ADC data samples
+    //
+    MAP_ADCTimerConfig(ADC_BASE,2^17);
+
+    //
+    // Enable ADC timer which is used to timestamp the ADC data samples
+    //
+    MAP_ADCTimerEnable(ADC_BASE);
+
+    //
+    // Enable ADC module
+    //
+    MAP_ADCEnable(ADC_BASE);
+
+    //
+    // Enable ADC channel
+    //
+    MAP_ADCChannelEnable(ADC_BASE, ADC_CH_3);
+
+    MAP_ADCFIFORead(ADC_BASE, ADC_CH_3);
+
+    MAP_ADCChannelDisable(ADC_BASE, ADC_CH_3);
+
+    //
+    // Print out ADC samples
+    //
+    UART_PRINT("\n\rVoltage is %f\n\r",(((float)((pulAdcSamples[4] >> 2 ) & 0x0FFF))*1.4)/6);
+    UART_PRINT("\n\r");
+
+    /********************************************************************************/
+
     //Read Device Mode Configuration
     ReadDeviceConfiguration();
 
@@ -1162,10 +1212,7 @@ void main()
 
     //UART Initialization
     MAP_PRCMPeripheralReset(PRCM_UARTA0);
-
-    MAP_UARTConfigSetExpClk(CONSOLE,MAP_PRCMPeripheralClockGet(CONSOLE_PERIPH),
-                            UART_BAUD_RATE,(UART_CONFIG_WLEN_8 | 
-                              UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE));
+    InitTerm();
 
     //Display Application Banner on UART Terminal
     DisplayBanner(APPLICATION_NAME);
@@ -1176,7 +1223,7 @@ void main()
     lRetVal = VStartSimpleLinkSpawnTask(SPAWN_TASK_PRIORITY);    
     if(lRetVal < 0)
     {
-        UART_PRINT("Unable to start simpelink spawn task\n\r");
+        UART_PRINT("Unable to start simplelink spawn task\n\r");
         LOOP_FOREVER();
     }
     //
