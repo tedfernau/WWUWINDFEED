@@ -1072,7 +1072,7 @@ static void HTTPServerTask(void *pvParameters)
 
     // Pinmux for the selected ADC input pin
     //
-    MAP_PinTypeADC(PIN_60,PIN_MODE_255);
+    MAP_PinTypeADC(PIN_57,PIN_MODE_255);
 
     //
     // Configure ADC timer which is used to timestamp the ADC data samples
@@ -1092,11 +1092,11 @@ static void HTTPServerTask(void *pvParameters)
     //
     // Enable ADC channel
     //
-    MAP_ADCChannelEnable(ADC_BASE, ADC_CH_3);
+    MAP_ADCChannelEnable(ADC_BASE, ADC_CH_0);
 
-    MAP_ADCFIFORead(ADC_BASE, ADC_CH_3);
+    MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
 
-    MAP_ADCChannelDisable(ADC_BASE, ADC_CH_3);
+    MAP_ADCChannelDisable(ADC_BASE, ADC_CH_0);
 
     //
     // Print out ADC samples
