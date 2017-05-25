@@ -91,7 +91,7 @@
 #include "pinmux.h"
 
 
-#define APPLICATION_NAME        "HTTP Server"
+#define APPLICATION_NAME        "WWU WIND FEED"
 #define APPLICATION_VERSION     "1.1.1"
 #define AP_SSID_LEN_MAX         (33)
 #define ROLE_INVALID            (-5)
@@ -103,6 +103,7 @@
 #define LED_OFF_STRING          "OFF"
 
 #define OOB_TASK_PRIORITY               (1)
+#define WIND_TASK_PRIORITY               (2)
 #define OSI_STACK_SIZE                  (2048)
 #define SH_GPIO_3                       (3)  /* P58 - Device Mode */
 #define ROLE_INVALID                    (-5)
@@ -1003,7 +1004,7 @@ long ConnectToNetwork()
 //! \return                        None
 //
 //****************************************************************************
-static void ReadDeviceConfiguration()
+static void ReadDeviceConfiguration()   //This probably needs to change, I want STA mode @@@
 {
     unsigned int uiGPIOPort;
     unsigned char pucGPIOPin;
@@ -1067,6 +1068,49 @@ static void HTTPServerTask(void *pvParameters)
     memset(g_ucSSID,'\0',AP_SSID_LEN_MAX);
     
 
+
+    //Read Device Mode Configuration
+    ReadDeviceConfiguration();
+
+    //Connect to Network
+    lRetVal = ConnectToNetwork();
+
+    //Stop Internal HTTP Server
+    lRetVal = sl_NetAppStop(SL_NET_APP_HTTP_SERVER_ID);
+    if(lRetVal < 0)
+    {
+        ERR_PRINT(lRetVal);
+        LOOP_FOREVER();
+    }
+
+    //Start Internal HTTP Server
+    lRetVal = sl_NetAppStart(SL_NET_APP_HTTP_SERVER_ID);
+    if(lRetVal < 0)
+    {
+        ERR_PRINT(lRetVal);
+        LOOP_FOREVER();
+    }
+
+    //Handle Async Events
+    while(1)
+    {
+
+    }
+}
+//****************************************************************************
+//
+//!  \brief                     Reads the ADC and calculates wind speed
+//!
+//! \param[in]                  pvParameters is the data passed to the Task
+//!
+//! \return                        None
+//
+//****************************************************************************
+static void WindTask(void *pvParameters )
+{
+
+
+
     /******************************************************************/
     //    Read ADC and calculate voltage
 
@@ -1104,29 +1148,6 @@ static void HTTPServerTask(void *pvParameters)
     UART_PRINT("\n\rVoltage is %f\n\r",(((float)((pulAdcSamples[4] >> 2 ) & 0x0FFF))*1.4)/6);
     UART_PRINT("\n\r");
 
-    /********************************************************************************/
-
-    //Read Device Mode Configuration
-    ReadDeviceConfiguration();
-
-    //Connect to Network
-    lRetVal = ConnectToNetwork();
-
-    //Stop Internal HTTP Server
-    lRetVal = sl_NetAppStop(SL_NET_APP_HTTP_SERVER_ID);
-    if(lRetVal < 0)
-    {
-        ERR_PRINT(lRetVal);
-        LOOP_FOREVER();
-    }
-
-    //Start Internal HTTP Server
-    lRetVal = sl_NetAppStart(SL_NET_APP_HTTP_SERVER_ID);
-    if(lRetVal < 0)
-    {
-        ERR_PRINT(lRetVal);
-        LOOP_FOREVER();
-    }
 
     //Handle Async Events
     while(1)
@@ -1233,7 +1254,18 @@ void main()
                          OSI_STACK_SIZE, NULL, OOB_TASK_PRIORITY, NULL );    
     if(lRetVal < 0)
     {
-        UART_PRINT("Unable to create task\n\r");
+        UART_PRINT("Unable to create  HTTPServerTask \n\r");
+        LOOP_FOREVER();
+    }
+
+    //
+    // Create WIND Task
+    //
+    lRetVal = osi_TaskCreate(WindTask, (signed char*)"WindTask",
+                         OSI_STACK_SIZE, NULL, WIND_TASK_PRIORITY, NULL );
+    if(lRetVal < 0)
+    {
+        UART_PRINT("Unable to create  WindTask \n\r");
         LOOP_FOREVER();
     }
 
