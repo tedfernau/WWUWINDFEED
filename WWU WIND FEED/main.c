@@ -96,8 +96,8 @@
 #define LED_ON_STRING           "ON"
 #define LED_OFF_STRING          "OFF"
 
-#define OOB_TASK_PRIORITY               (3)
-#define WIND_TASK_PRIORITY               (2)
+#define OOB_TASK_PRIORITY               (1)
+#define WIND_TASK_PRIORITY               (1)
 #define OSI_STACK_SIZE                  (2048)
 #define SH_GPIO_3                       (3)  /* P58 - Device Mode */
 #define ROLE_INVALID                    (-5)
@@ -105,6 +105,7 @@
 
 
 #define NO_OF_SAMPLES       128
+#define WIND_SPEED_FACTOR   10
 
 // Application specific status/error codes
 typedef enum{
@@ -125,6 +126,9 @@ unsigned long  g_ulPingPacketsRecv = 0; //Number of Ping Packets received
 unsigned long  g_ulGatewayIP = 0; //Network Gateway IP address
 unsigned char  g_ucConnectionSSID[SSID_LEN_MAX+1]; //Connection SSID
 unsigned char  g_ucConnectionBSSID[BSSID_LEN_MAX]; //Connection BSSID
+
+static const char pcDigits[] = "0123456789";
+static unsigned char GET_token_TEMP[]  = "__SL_G_UTP";
 unsigned char POST_token[] = "__SL_P_ULD";
 unsigned char GET_token[]  = "__SL_G_ULD";
 int g_iSimplelinkRole = ROLE_INVALID;
@@ -135,6 +139,15 @@ unsigned long Adc_Samples [4096];
 unsigned long Adc_Sample;
 unsigned long Voltage;
 unsigned long Wind_Speed;
+
+
+
+struct Wind_Struct {
+    float fCurrentTemp;
+   OsiLockObj_t LockObj;
+} WindKey;
+
+
 
 
 #if defined(ccs)
@@ -231,12 +244,66 @@ void vApplicationMallocFailedHook()
 void vApplicationStackOverflowHook( OsiTaskHandle *pxTask,
                                    signed char *pcTaskName)
 {
+        ( void ) pxTask;
+        ( void ) pcTaskName;
+
     //Handle FreeRTOS Stack Overflow
     while(1)
     {
     }
 }
 #endif //USE_FREERTOS
+
+
+//*****************************************************************************
+//
+//! itoa
+//!
+//!    @brief  Convert integer to ASCII in decimal base
+//!
+//!     @param  cNum is input integer number to convert
+//!     @param  cString is output string
+//!
+//!     @return number of ASCII parameters
+//!
+//!
+//
+//*****************************************************************************
+static unsigned short itoa(char cNum, char *cString)
+{
+    char* ptr;
+    char uTemp = cNum;
+    unsigned short length;
+
+    // value 0 is a special case
+    if (cNum == 0)
+    {
+        length = 1;
+        *cString = '0';
+
+        return length;
+    }
+
+    // Find out the length of the number, in decimal base
+    length = 0;
+    while (uTemp > 0)
+    {
+        uTemp /= 10;
+        length++;
+    }
+
+    // Do the actual formatting, right to left
+    uTemp = cNum;
+    ptr = cString + length;
+    while (uTemp > 0)
+    {
+        --ptr;
+        *ptr = pcDigits[uTemp % 10];
+        uTemp /= 10;
+    }
+
+    return length;
+}
 
 
 
@@ -583,6 +650,7 @@ void SimpleLinkHttpServerCallback(SlHttpServerEvent_t *pSlHttpServerEvent,
                                SlHttpServerResponse_t *pSlHttpServerResponse)
 {
     unsigned char strLenVal = 0;
+    long lRetVal = -1;
 
     if(!pSlHttpServerEvent || !pSlHttpServerResponse)
     {
@@ -593,53 +661,42 @@ void SimpleLinkHttpServerCallback(SlHttpServerEvent_t *pSlHttpServerEvent,
     {
         case SL_NETAPP_HTTPGETTOKENVALUE_EVENT:
         {
-          unsigned char status, *ptr;
+          unsigned char  *ptr;
 
           ptr = pSlHttpServerResponse->ResponseData.token_value.data;
           pSlHttpServerResponse->ResponseData.token_value.len = 0;
-          if(memcmp(pSlHttpServerEvent->EventData.httpTokenName.data, GET_token,
-                    strlen((const char *)GET_token)) == 0)
-          {
-            status = GPIO_IF_LedStatus(MCU_RED_LED_GPIO);
-            strLenVal = strlen(LED1_STRING);
-            memcpy(ptr, LED1_STRING, strLenVal);
-            ptr += strLenVal;
-            pSlHttpServerResponse->ResponseData.token_value.len += strLenVal;
-            if(status & 0x01)
+          if(memcmp(pSlHttpServerEvent->EventData.httpTokenName.data,
+                    GET_token_TEMP, strlen((const char *)GET_token_TEMP)) == 0)
             {
-              strLenVal = strlen(LED_ON_STRING);
-              memcpy(ptr, LED_ON_STRING, strLenVal);
-              ptr += strLenVal;
-              pSlHttpServerResponse->ResponseData.token_value.len += strLenVal;
+
+
+              lRetVal =  osi_LockObjUnlock(&WindKey.LockObj);
+              if(lRetVal < 0)
+              {
+                  UART_PRINT("Unable to unlock  mutex key for serving");
+                  LOOP_FOREVER();
+              }
+              //mutex pend on wind resource
+
+              char cTemp = (char)WindKey.fCurrentTemp;
+
+              lRetVal =  osi_LockObjLock(&WindKey.LockObj,OSI_WAIT_FOREVER);
+              if(lRetVal < 0)
+              {
+                  UART_PRINT("Unable to lock  mutex key after serving");
+                  LOOP_FOREVER();
+              }
+
+
+              short sTempLen = itoa(cTemp,(char*)ptr);
+              ptr[sTempLen++] = ' ';
+              ptr[sTempLen] = 'F';
+              pSlHttpServerResponse->ResponseData.token_value.len += sTempLen;
+
             }
-            else
-            {
-              strLenVal = strlen(LED_OFF_STRING);
-              memcpy(ptr, LED_OFF_STRING, strLenVal);
-              ptr += strLenVal;
-              pSlHttpServerResponse->ResponseData.token_value.len += strLenVal;
-            }
-            status = GPIO_IF_LedStatus(MCU_GREEN_LED_GPIO);
-            strLenVal = strlen(LED2_STRING);
-            memcpy(ptr, LED2_STRING, strLenVal);
-            ptr += strLenVal;
-            pSlHttpServerResponse->ResponseData.token_value.len += strLenVal;
-            if(status & 0x01)
-            {
-              strLenVal = strlen(LED_ON_STRING);
-              memcpy(ptr, LED_ON_STRING, strLenVal);
-              ptr += strLenVal;
-              pSlHttpServerResponse->ResponseData.token_value.len += strLenVal;
-            }
-            else
-            {
-              strLenVal = strlen(LED_OFF_STRING);
-              memcpy(ptr, LED_OFF_STRING, strLenVal);
-              ptr += strLenVal;
-              pSlHttpServerResponse->ResponseData.token_value.len += strLenVal;
-            }
+
             *ptr = '\0';
-          }
+
 
         }
         break;
@@ -1113,7 +1170,7 @@ static void HTTPServerTask(void *pvParameters)
 static void WindTask(void *pvParameters )
 {
     //*********************************** ADC variable initialization
-
+    long lRetVal = -1;
     unsigned int Sample_Count = 0;
     unsigned long Cur_Sample;
 
@@ -1147,24 +1204,53 @@ while(1){
     //
     MAP_ADCChannelEnable(ADC_BASE, ADC_CH_0);
 
- /*   while(Sample_Count < NO_OF_SAMPLES + 4)
-        {
-            if(MAP_ADCFIFOLvlGet(ADC_BASE, ADC_CH_0))
+    while(Sample_Count < NO_OF_SAMPLES + 4){
+            if(MAP_ADCFIFOLvlGet(ADC_BASE,ADC_CH_0))
             {
                 Cur_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
                 Adc_Samples[Sample_Count++] = Cur_Sample;
             }
+        }
 
-        }           */
+    /*
     if(MAP_ADCFIFOLvlGet(ADC_BASE, ADC_CH_0)){
     Adc_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
     }
+    */
+
     MAP_ADCChannelDisable(ADC_BASE, ADC_CH_0);
 
     Sample_Count = 0;
 
-    Voltage = (((float)((Adc_Sample) & 0x00FF))*1.467)/1;
-    Wind_Speed = (float) (Voltage * 10);
+
+    Voltage = (((float)((Adc_Samples[4+Sample_Count] >> 2 ) & 0x0FFF))*1.4)/4096;
+    Wind_Speed = (float) (Voltage * WIND_SPEED_FACTOR);
+
+
+    //mutex pend on wind shared wind resource
+
+    lRetVal =  osi_LockObjUnlock(&WindKey.LockObj);
+    if(lRetVal < 0)
+    {
+        UART_PRINT("Unable to unlock  mutex key for serving");
+        LOOP_FOREVER();
+    }
+
+    WindKey.fCurrentTemp = Wind_Speed;
+
+
+    lRetVal =  osi_LockObjLock(&WindKey.LockObj,OSI_NO_WAIT);
+    if(lRetVal < 0)
+    {
+        UART_PRINT("Unable to lock  mutex key after serving");
+        LOOP_FOREVER();
+    }
+    WindKey.fCurrentTemp = Wind_Speed;
+
+    //mutex post for wind resource
+
+
+
     //
     // Print out ADC samples
     //
@@ -1295,6 +1381,22 @@ void main()
         UART_PRINT("Unable to create  WindTask \n\r");
         LOOP_FOREVER();
     }
+
+    /* create and lock the mutex*/
+    lRetVal =  osi_LockObjCreate(&WindKey.LockObj);
+    if(lRetVal < 0)
+    {
+        UART_PRINT("Unable to create  mutex key");
+        LOOP_FOREVER();
+    }
+    lRetVal =  osi_LockObjLock(&WindKey.LockObj,SL_OS_NO_WAIT);
+    if(lRetVal < 0)
+    {
+        UART_PRINT("Unable to lock  mutex key");
+        LOOP_FOREVER();
+    }
+
+
 
     //
     // Start OS Scheduler
