@@ -1,0 +1,39 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+		<script src="js/jquery-1.8.3.min.js"></script>
+		<script src="js/com.TI.tokenPoller.js"></script>
+		<script src="js/page-actions.js"></script>
+		<script type="text/javascript">
+		$(function() {
+			var Device_Temperature = $('#Device_Temperature_out'),
+				demoPolling = new com.TI.tokenPoller({
+					"paramPage": "param_demos.html", 
+					"refreshRate": 200,
+					"valueMap": [{
+					"paramId": "Device_Temperature",
+						"outputSuccess": function(output) {
+							Device_Temperature.html(output);
+						},
+						"outputDefault": function() {
+							Device_Temperature.html("<i>reloading</i>");
+						}
+					}]
+				});
+		});
+		</script>
+</head>
+
+<body>
+
+
+	<div class="washerText">Water Temp:<br /><span id="Device_Temperature_out">
+	<br style="clear:both;" /><br>
+            
+        
+    </div>
+   
+</body>
+</html>

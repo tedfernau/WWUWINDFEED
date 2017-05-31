@@ -35,15 +35,9 @@
 
 //*****************************************************************************
 //
-// Application Name     -   HTTP Server
-// Application Overview -   This is a sample application demonstrating
-//                          interaction between HTTP Client(Browser) and 
-//                          SimpleLink Device.The SimpleLink device runs an 
-//                          HTTP Server and user can interact using web browser.
-// Application Details  -
-// http://processors.wiki.ti.com/index.php/CC32xx_HTTP_Server
-// or
-// doc\examples\CC32xx_HTTP_Server.pdf
+// Application Name     -   WWU Wind Feed, modified from HTTP Server example
+// Application Overview -   This application reads the wind speed from an anemometer,
+//                          and publishes the information on a local web page via Wifi
 //
 //*****************************************************************************
 
@@ -91,7 +85,7 @@
 #include "pinmux.h"
 
 
-#define APPLICATION_NAME        "WWU WIND FEED"
+#define APPLICATION_NAME        "WWU_WIND_FEED"
 #define APPLICATION_VERSION     "1.1.1"
 #define AP_SSID_LEN_MAX         (33)
 #define ROLE_INVALID            (-5)
@@ -102,12 +96,13 @@
 #define LED_ON_STRING           "ON"
 #define LED_OFF_STRING          "OFF"
 
-#define OOB_TASK_PRIORITY               (1)
+#define OOB_TASK_PRIORITY               (3)
 #define WIND_TASK_PRIORITY               (2)
 #define OSI_STACK_SIZE                  (2048)
 #define SH_GPIO_3                       (3)  /* P58 - Device Mode */
 #define ROLE_INVALID                    (-5)
 #define AUTO_CONNECTION_TIMEOUT_COUNT   (50)   /* 5 Sec */
+
 
 #define NO_OF_SAMPLES       128
 
@@ -136,7 +131,11 @@ int g_iSimplelinkRole = ROLE_INVALID;
 signed int g_uiIpAddress = 0;
 unsigned char g_ucSSID[AP_SSID_LEN_MAX];
 
-unsigned long pulAdcSamples[6];
+unsigned long Adc_Samples [4096];
+unsigned long Adc_Sample;
+unsigned long Voltage;
+unsigned long Wind_Speed;
+
 
 #if defined(ccs)
 extern void (* const g_pfnVectors[])(void);
@@ -147,6 +146,10 @@ extern uVectorEntry __vector_table;
 //*****************************************************************************
 //                 GLOBAL VARIABLES -- End
 //*****************************************************************************
+
+//****************************************************************************
+//                      LOCAL FUNCTION PROTOTYPES
+//****************************************************************************
 
 
 //*****************************************************************************
@@ -160,7 +163,7 @@ volatile unsigned char g_ucConnectTimeout =0;
 
 
 
-#ifdef USE_FREERTOS
+#ifdef USE_FREERTOS         //looks like we are using Free RTOS
 //*****************************************************************************
 // FreeRTOS User Hook Functions enabled in FreeRTOSConfig.h
 //*****************************************************************************
@@ -853,6 +856,7 @@ static long ConfigureSimpleLinkToDefaultState()
 
 
 
+
 //****************************************************************************
 //
 //!    \brief Connects to the Network in AP or STA Mode - If ForceAP Jumper is
@@ -950,40 +954,40 @@ long ConnectToNetwork()
         lRetVal = sl_NetAppStart(SL_NET_APP_HTTP_SERVER_ID);
         ASSERT_ON_ERROR( lRetVal);
         
-		//waiting for the device to Auto Connect
-		while ( (!IS_IP_ACQUIRED(g_ulStatus))&&
-			   g_ucConnectTimeout < AUTO_CONNECTION_TIMEOUT_COUNT)
-		{
-			//Turn RED LED On
-			GPIO_IF_LedOn(MCU_RED_LED_GPIO);
-			osi_Sleep(50);
+        //waiting for the device to Auto Connect
+        while ( (!IS_IP_ACQUIRED(g_ulStatus))&&
+               g_ucConnectTimeout < AUTO_CONNECTION_TIMEOUT_COUNT)
+        {
+            //Turn RED LED On
+            GPIO_IF_LedOn(MCU_RED_LED_GPIO);
+            osi_Sleep(50);
 
-			//Turn RED LED Off
-			GPIO_IF_LedOff(MCU_RED_LED_GPIO);
-			osi_Sleep(50);
+            //Turn RED LED Off
+            GPIO_IF_LedOff(MCU_RED_LED_GPIO);
+            osi_Sleep(50);
 
-			g_ucConnectTimeout++;
-		}
-		//Couldn't connect Using Auto Profile
-		if(g_ucConnectTimeout == AUTO_CONNECTION_TIMEOUT_COUNT)
-		{
-			//Blink Red LED to Indicate Connection Error
-			GPIO_IF_LedOn(MCU_RED_LED_GPIO);
+            g_ucConnectTimeout++;
+        }
+        //Couldn't connect Using Auto Profile
+        if(g_ucConnectTimeout == AUTO_CONNECTION_TIMEOUT_COUNT)
+        {
+            //Blink Red LED to Indicate Connection Error
+            GPIO_IF_LedOn(MCU_RED_LED_GPIO);
 
-			CLR_STATUS_BIT_ALL(g_ulStatus);
+            CLR_STATUS_BIT_ALL(g_ulStatus);
 
-			Report("Use Smart Config Application to configure the device.\n\r");
-			//Connect Using Smart Config
-			lRetVal = SmartConfigConnect();
-			ASSERT_ON_ERROR(lRetVal);
+            Report("Use Smart Config Application to configure the device.\n\r");
+            //Connect Using Smart Config
+            lRetVal = SmartConfigConnect();
+            ASSERT_ON_ERROR(lRetVal);
 
-			//Waiting for the device to Auto Connect
-			while(!IS_IP_ACQUIRED(g_ulStatus))
-			{
-				MAP_UtilsDelay(500);
-			}
+            //Waiting for the device to Auto Connect
+            while(!IS_IP_ACQUIRED(g_ulStatus))
+            {
+                MAP_UtilsDelay(500);
+            }
 
-		}
+        }
     //Turn RED LED Off
     GPIO_IF_LedOff(MCU_RED_LED_GPIO);
     UART_PRINT("\n\rDevice is in STA Mode, Connect to the AP[%s] and type"
@@ -1108,6 +1112,10 @@ static void HTTPServerTask(void *pvParameters)
 //****************************************************************************
 static void WindTask(void *pvParameters )
 {
+    //*********************************** ADC variable initialization
+
+    unsigned int Sample_Count = 0;
+    unsigned long Cur_Sample;
 
 
 
@@ -1116,7 +1124,7 @@ static void WindTask(void *pvParameters )
 
     // Pinmux for the selected ADC input pin
     //
-    MAP_PinTypeADC(PIN_57,PIN_MODE_255);
+    MAP_PinTypeADC(PIN_59,PIN_MODE_255);
 
     //
     // Configure ADC timer which is used to timestamp the ADC data samples
@@ -1133,27 +1141,47 @@ static void WindTask(void *pvParameters )
     //
     MAP_ADCEnable(ADC_BASE);
 
+while(1){
     //
     // Enable ADC channel
     //
     MAP_ADCChannelEnable(ADC_BASE, ADC_CH_0);
 
-    MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
+ /*   while(Sample_Count < NO_OF_SAMPLES + 4)
+        {
+            if(MAP_ADCFIFOLvlGet(ADC_BASE, ADC_CH_0))
+            {
+                Cur_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
+                Adc_Samples[Sample_Count++] = Cur_Sample;
+            }
 
+        }           */
+    if(MAP_ADCFIFOLvlGet(ADC_BASE, ADC_CH_0)){
+    Adc_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
+    }
     MAP_ADCChannelDisable(ADC_BASE, ADC_CH_0);
 
+    Sample_Count = 0;
+
+    Voltage = (((float)((Adc_Sample) & 0x00FF))*1.467)/1;
+    Wind_Speed = (float) (Voltage * 10);
     //
     // Print out ADC samples
     //
-    UART_PRINT("\n\rVoltage is %f\n\r",(((float)((pulAdcSamples[4] >> 2 ) & 0x0FFF))*1.4)/6);
-    UART_PRINT("\n\r");
+    UART_PRINT("\n\rVoltage is %f\n\r",(((float)((Adc_Sample >> 2 ) & 0x0FFF))*1.467)/1);
 
-
-    //Handle Async Events
-    while(1)
+   /* while(Sample_Count < NO_OF_SAMPLES)
     {
-         
+        UART_PRINT("\n\rVoltage is %f\n\r",(((float)((Adc_Samples[4+Sample_Count] >> 2 ) & 0x0FFF))*1.4)/4096);
+        Sample_Count++;
     }
+
+    UART_PRINT("\n\r");             */
+
+    osi_Sleep(10000);
+    }
+
+
 }
 //*****************************************************************************
 //
@@ -1184,8 +1212,7 @@ DisplayBanner(char * AppName)
 //! \return None
 //
 //*****************************************************************************
-static void
-BoardInit(void)
+static void BoardInit(void)
 {
 /* In case of TI-RTOS vector table is initialize by OS itself */
 #ifndef USE_TIRTOS
