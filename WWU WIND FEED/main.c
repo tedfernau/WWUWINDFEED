@@ -38,15 +38,11 @@
 // Application Name     -   WWU Wind Feed, modified from HTTP Server example
 // Application Overview -   This application reads the wind speed from an anemometer,
 //                          and publishes the information on a local web page via Wifi
+
+//modified by Ted Fernau, 5/2017
 //
 //*****************************************************************************
 
-//****************************************************************************
-//
-//! \addtogroup httpserver
-//! @{
-//
-//****************************************************************************
 
 // Standard includes
 #include <string.h>
@@ -96,16 +92,26 @@
 #define LED_ON_STRING           "ON"
 #define LED_OFF_STRING          "OFF"
 
-#define OOB_TASK_PRIORITY               (1)
-#define WIND_TASK_PRIORITY               (1)
-#define OSI_STACK_SIZE                  (2048)
 #define SH_GPIO_3                       (3)  /* P58 - Device Mode */
 #define ROLE_INVALID                    (-5)
 #define AUTO_CONNECTION_TIMEOUT_COUNT   (50)   /* 5 Sec */
 
 
+/*****************************************************
+                    TEDs defines                              //todo 1  #defines
+ *******************************************************/
+#define OOB_TASK_PRIORITY               (2)       // higher number is higher priority
+#define WIND_TASK_PRIORITY               (1)
+#define OSI_STACK_SIZE                  (2048)
 #define NO_OF_SAMPLES       128
-#define WIND_SPEED_FACTOR   10
+#define WIND_SPEED_FACTOR   10                     //conversion factor for wind speed estimate
+
+/*****************************************************
+                    END
+ *******************************************************/
+
+
+
 
 // Application specific status/error codes
 typedef enum{
@@ -128,26 +134,34 @@ unsigned char  g_ucConnectionSSID[SSID_LEN_MAX+1]; //Connection SSID
 unsigned char  g_ucConnectionBSSID[BSSID_LEN_MAX]; //Connection BSSID
 
 static const char pcDigits[] = "0123456789";
-static unsigned char GET_token_TEMP[]  = "__SL_G_UTP";
+
 unsigned char POST_token[] = "__SL_P_ULD";
 unsigned char GET_token[]  = "__SL_G_ULD";
 int g_iSimplelinkRole = ROLE_INVALID;
 signed int g_uiIpAddress = 0;
 unsigned char g_ucSSID[AP_SSID_LEN_MAX];
 
+
+
+
+/*****************************************************
+                                                  //todo 2 Global variables
+ *******************************************************/
+static unsigned char GET_token_TEMP[]  = "__SL_G_UTP";              //this is the handle for the token which is polled by javascript
+
 unsigned long Adc_Samples [4096];
 unsigned long Adc_Sample;
 unsigned long Voltage;
-unsigned long Wind_Speed;
+unsigned long Wind_Speed;                                     //  This is the calculated wind speed
 
-
-
-struct Wind_Struct {
+struct Wind_Struct {                                //This structure holds the shared wind data object and the lock parameter
     float fCurrentTemp;
    OsiLockObj_t LockObj;
-} WindKey;
+} Wind_Object;                                       //there is only 1 instance
 
-
+/*****************************************************
+                    END
+ *******************************************************/
 
 
 #if defined(ccs)
@@ -159,6 +173,8 @@ extern uVectorEntry __vector_table;
 //*****************************************************************************
 //                 GLOBAL VARIABLES -- End
 //*****************************************************************************
+
+
 
 //****************************************************************************
 //                      LOCAL FUNCTION PROTOTYPES
@@ -646,8 +662,8 @@ void SimpleLinkSockEventHandler(SlSockEvent_t *pSock)
 //! \return None
 //!
 //*****************************************************************************
-void SimpleLinkHttpServerCallback(SlHttpServerEvent_t *pSlHttpServerEvent, 
-                               SlHttpServerResponse_t *pSlHttpServerResponse)
+void SimpleLinkHttpServerCallback(SlHttpServerEvent_t *pSlHttpServerEvent,      //todo 3 this module takes the  key and passes the wind
+                               SlHttpServerResponse_t *pSlHttpServerResponse)   //     data in a format the javascript can poll
 {
     unsigned char strLenVal = 0;
     long lRetVal = -1;
@@ -657,41 +673,42 @@ void SimpleLinkHttpServerCallback(SlHttpServerEvent_t *pSlHttpServerEvent,
         return;
     }
     
-    switch (pSlHttpServerEvent->Event)
+    switch (pSlHttpServerEvent->Event)                              //there is an event
     {
-        case SL_NETAPP_HTTPGETTOKENVALUE_EVENT:
+        case SL_NETAPP_HTTPGETTOKENVALUE_EVENT:                     //the event is an HTTP get-token value event
         {
           unsigned char  *ptr;
 
-          ptr = pSlHttpServerResponse->ResponseData.token_value.data;
-          pSlHttpServerResponse->ResponseData.token_value.len = 0;
-          if(memcmp(pSlHttpServerEvent->EventData.httpTokenName.data,
+          ptr = pSlHttpServerResponse->ResponseData.token_value.data;       //point to token message
+          pSlHttpServerResponse->ResponseData.token_value.len = 0;          // set the message length to zero
+          if(memcmp(pSlHttpServerEvent->EventData.httpTokenName.data,       //if token name is correct,
                     GET_token_TEMP, strlen((const char *)GET_token_TEMP)) == 0)
             {
 
 
-              lRetVal =  osi_LockObjUnlock(&WindKey.LockObj);
+              lRetVal =  osi_LockObjLock(&Wind_Object.LockObj,OSI_WAIT_FOREVER);//take mutex key while updating data
               if(lRetVal < 0)
               {
-                  UART_PRINT("Unable to unlock  mutex key for serving");
-                  LOOP_FOREVER();
-              }
-              //mutex pend on wind resource
-
-              char cTemp = (char)WindKey.fCurrentTemp;
-
-              lRetVal =  osi_LockObjLock(&WindKey.LockObj,OSI_WAIT_FOREVER);
-              if(lRetVal < 0)
-              {
-                  UART_PRINT("Unable to lock  mutex key after serving");
+                  UART_PRINT("Unable to lock  mutex key for serving");
                   LOOP_FOREVER();
               }
 
 
-              short sTempLen = itoa(cTemp,(char*)ptr);
+              char cWind = (char)Wind_Object.fCurrentTemp;      //update data to location for javascript
+
+
+
+              lRetVal =  osi_LockObjUnlock(&Wind_Object.LockObj);   //free object for use by WindTask
+              if(lRetVal < 0)
+              {
+                  UART_PRINT("Unable to unlock  mutex key after serving");
+                  LOOP_FOREVER();
+              }
+
+              short sTempLen = itoa(cWind,(char*)ptr);          //convert integer to ASCII
               ptr[sTempLen++] = ' ';
               ptr[sTempLen] = 'F';
-              pSlHttpServerResponse->ResponseData.token_value.len += sTempLen;
+              pSlHttpServerResponse->ResponseData.token_value.len += sTempLen; //adjust frame for size of data
 
             }
 
@@ -1035,7 +1052,7 @@ long ConnectToNetwork()
 
             Report("Use Smart Config Application to configure the device.\n\r");
             //Connect Using Smart Config
-            lRetVal = SmartConfigConnect();
+            lRetVal = SmartConfigConnect();             ///lets change this to wlan connect or something
             ASSERT_ON_ERROR(lRetVal);
 
             //Waiting for the device to Auto Connect
@@ -1124,87 +1141,70 @@ static void HTTPServerTask(void *pvParameters)
         LOOP_FOREVER();
     }
 
+
     UART_PRINT("Device is configured in default state \n\r");  
   
     memset(g_ucSSID,'\0',AP_SSID_LEN_MAX);
     
+    ReadDeviceConfiguration();          //Read Device Mode Configuration
+    lRetVal = ConnectToNetwork();           //Connect to Network
 
-
-    //Read Device Mode Configuration
-    ReadDeviceConfiguration();
-
-    //Connect to Network
-    lRetVal = ConnectToNetwork();
-
-    //Stop Internal HTTP Server
-    lRetVal = sl_NetAppStop(SL_NET_APP_HTTP_SERVER_ID);
+    lRetVal = sl_NetAppStop(SL_NET_APP_HTTP_SERVER_ID);   //Stop Internal HTTP Server
     if(lRetVal < 0)
     {
         ERR_PRINT(lRetVal);
         LOOP_FOREVER();
     }
 
-    //Start Internal HTTP Server
-    lRetVal = sl_NetAppStart(SL_NET_APP_HTTP_SERVER_ID);
+    lRetVal = sl_NetAppStart(SL_NET_APP_HTTP_SERVER_ID);   //Stop Internal HTTP Server
     if(lRetVal < 0)
     {
         ERR_PRINT(lRetVal);
         LOOP_FOREVER();
     }
 
-    //Handle Async Events
-    while(1)
+
+    while(1)        //Handle Async Events
     {
 
     }
 }
-//****************************************************************************
-//
-//!  \brief                     Reads the ADC and calculates wind speed
+//**************************************************************************** todo 4 WindTask
+//              WindTask
+//!  \brief                     Reads the ADC and calculates wind speed,
 //!
-//! \param[in]                  pvParameters is the data passed to the Task
+//! \param[in]                  pvParameters is a pointer to the data passed to the Task
 //!
 //! \return                        None
 //
+//      Adapted from TI example by Ted Fernau 5/2017
 //****************************************************************************
 static void WindTask(void *pvParameters )
 {
-    //*********************************** ADC variable initialization
-    long lRetVal = -1;
     unsigned int Sample_Count = 0;
     unsigned long Cur_Sample;
+    long lRetVal = -1;              //for OS error traps
 
 
-
+    //    Initialize
     /******************************************************************/
-    //    Read ADC and calculate voltage
 
-    // Pinmux for the selected ADC input pin
-    //
-    MAP_PinTypeADC(PIN_59,PIN_MODE_255);
+    MAP_PinTypeADC(PIN_59,PIN_MODE_255);        // Pinmux for the selected ADC input pin
 
-    //
-    // Configure ADC timer which is used to timestamp the ADC data samples
-    //
-    MAP_ADCTimerConfig(ADC_BASE,2^17);
+    MAP_ADCTimerConfig(ADC_BASE,2^17);          // Configure ADC timer which is used to timestamp the ADC data samples
 
-    //
-    // Enable ADC timer which is used to timestamp the ADC data samples
-    //
-    MAP_ADCTimerEnable(ADC_BASE);
+    MAP_ADCTimerEnable(ADC_BASE);               // Enable ADC timer which is used to timestamp the ADC data samples
 
-    //
-    // Enable ADC module
-    //
-    MAP_ADCEnable(ADC_BASE);
+    MAP_ADCEnable(ADC_BASE);                    // Enable ADC module
 
+
+    //  ADC read and wind speed calc. loop
+    /******************************************************************/
 while(1){
-    //
-    // Enable ADC channel
-    //
-    MAP_ADCChannelEnable(ADC_BASE, ADC_CH_0);
 
-    while(Sample_Count < NO_OF_SAMPLES + 4){
+    MAP_ADCChannelEnable(ADC_BASE, ADC_CH_0);       // Enable free-running ADC channel each loop
+
+    while(Sample_Count < NO_OF_SAMPLES + 4){        //read ADC into array
             if(MAP_ADCFIFOLvlGet(ADC_BASE,ADC_CH_0))
             {
                 Cur_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
@@ -1212,59 +1212,55 @@ while(1){
             }
         }
 
-    /*
-    if(MAP_ADCFIFOLvlGet(ADC_BASE, ADC_CH_0)){
-    Adc_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
-    }
-    */
+        /*
+        if(MAP_ADCFIFOLvlGet(ADC_BASE, ADC_CH_0)){          //I am experimenting with single value vs. windowed sampling
+        Adc_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
+        }
+        */
 
     MAP_ADCChannelDisable(ADC_BASE, ADC_CH_0);
 
-    Sample_Count = 0;
+    Sample_Count = 0;   //reset count
 
 
-    Voltage = (((float)((Adc_Samples[4+Sample_Count] >> 2 ) & 0x0FFF))*1.4)/4096;
+    Voltage = (((float)((Adc_Samples[4+Sample_Count] >> 2 ) & 0x0FFF))*1.467)/4096; //currently just pulling 4th sample and manipulating
     Wind_Speed = (float) (Voltage * WIND_SPEED_FACTOR);
 
 
-    //mutex pend on wind shared wind resource
 
-    lRetVal =  osi_LockObjUnlock(&WindKey.LockObj);
+    lRetVal =  osi_LockObjLock(&Wind_Object.LockObj,OSI_WAIT_FOREVER);  //Take the key to update the data for polling
     if(lRetVal < 0)
     {
-        UART_PRINT("Unable to unlock  mutex key for serving");
+        UART_PRINT("Unable to take  mutex key for updating");
         LOOP_FOREVER();
     }
 
-    WindKey.fCurrentTemp = Wind_Speed;
+
+    Wind_Object.fCurrentTemp = Wind_Speed;          //Update Wind speed for HTTP Server Task
 
 
-    lRetVal =  osi_LockObjLock(&WindKey.LockObj,OSI_NO_WAIT);
+
+    lRetVal =  osi_LockObjUnlock(&Wind_Object.LockObj);             //Return the key
     if(lRetVal < 0)
     {
-        UART_PRINT("Unable to lock  mutex key after serving");
+        UART_PRINT("Unable to return  mutex key after updating");
         LOOP_FOREVER();
     }
-    WindKey.fCurrentTemp = Wind_Speed;
-
-    //mutex post for wind resource
 
 
 
-    //
     // Print out ADC samples
-    //
-    UART_PRINT("\n\rVoltage is %f\n\r",(((float)((Adc_Sample >> 2 ) & 0x0FFF))*1.467)/1);
+    //UART_PRINT("\n\rVoltage is %f\n\r",(((float)((Adc_Sample >> 2 ) & 0x0FFF))*1.467)/4096);        //UART for debug
 
-   /* while(Sample_Count < NO_OF_SAMPLES)
+   /* while(Sample_Count < NO_OF_SAMPLES)                            //print all 128 samples every cycle
     {
         UART_PRINT("\n\rVoltage is %f\n\r",(((float)((Adc_Samples[4+Sample_Count] >> 2 ) & 0x0FFF))*1.4)/4096);
         Sample_Count++;
     }
+ */
+    UART_PRINT("\n\r");
 
-    UART_PRINT("\n\r");             */
-
-    osi_Sleep(10000);
+    osi_Sleep(5000);    // delay for periodic behavior
     }
 
 
@@ -1321,60 +1317,51 @@ static void BoardInit(void)
     PRCMCC3200MCUInit();
 }
 
-//****************************************************************************
+//****************************************************************************      todo 5: most of this is not mine
 //                            MAIN FUNCTION
 //****************************************************************************
 void main()
 {
     long lRetVal = -1;
-  
-    //Board Initialization
-    BoardInit();
-    
-    //Pin Configuration
-    PinMuxConfig();
-    
-    //Change Pin 58 Configuration from Default to Pull Down
-    MAP_PinConfigSet(PIN_58,PIN_STRENGTH_2MA|PIN_STRENGTH_4MA,PIN_TYPE_STD_PD);
-    
-    //
-    // Initialize GREEN and ORANGE LED
-    //
-    GPIO_IF_LedConfigure(LED1|LED2|LED3);
-    //Turn Off the LEDs
-    GPIO_IF_LedOff(MCU_ALL_LED_IND);
 
-    //UART Initialization
-    MAP_PRCMPeripheralReset(PRCM_UARTA0);
+ /*                         initialize
+ ****************************************************************************/
+
+    BoardInit();        //Board Initialization
+    PinMuxConfig();     //Pin Configuration
+    MAP_PinConfigSet(PIN_58,PIN_STRENGTH_2MA|PIN_STRENGTH_4MA,PIN_TYPE_STD_PD);     //Change Pin 58 Configuration from Default to Pull Down
+
+    GPIO_IF_LedConfigure(LED1|LED2|LED3);            // Initialize GREEN and ORANGE LED
+    GPIO_IF_LedOff(MCU_ALL_LED_IND);                 //Turn Off the LEDs
+
+    MAP_PRCMPeripheralReset(PRCM_UARTA0);            //UART Initialization
     InitTerm();
 
-    //Display Application Banner on UART Terminal
-    DisplayBanner(APPLICATION_NAME);
-    
-    //
-    // Simplelinkspawntask
-    //
-    lRetVal = VStartSimpleLinkSpawnTask(SPAWN_TASK_PRIORITY);    
+
+    /*                         run
+     ****************************************************************************/
+
+    DisplayBanner(APPLICATION_NAME);                 //Display Application Banner on UART Terminal
+
+
+    lRetVal = VStartSimpleLinkSpawnTask(SPAWN_TASK_PRIORITY);           // Simplelinkspawntask
     if(lRetVal < 0)
     {
         UART_PRINT("Unable to start simplelink spawn task\n\r");
         LOOP_FOREVER();
     }
-    //
-    // Create HTTP Server Task
-    //
-    lRetVal = osi_TaskCreate(HTTPServerTask, (signed char*)"HTTPServerTask",
-                         OSI_STACK_SIZE, NULL, OOB_TASK_PRIORITY, NULL );    
+
+
+    lRetVal = osi_TaskCreate(HTTPServerTask, (signed char*)"HTTPServerTask",            // Create HTTP Server Task
+                         OSI_STACK_SIZE, NULL, OOB_TASK_PRIORITY, NULL );
     if(lRetVal < 0)
     {
         UART_PRINT("Unable to create  HTTPServerTask \n\r");
         LOOP_FOREVER();
     }
 
-    //
-    // Create WIND Task
-    //
-    lRetVal = osi_TaskCreate(WindTask, (signed char*)"WindTask",
+
+    lRetVal = osi_TaskCreate(WindTask, (signed char*)"WindTask",                        // Create WIND Task
                          OSI_STACK_SIZE, NULL, WIND_TASK_PRIORITY, NULL );
     if(lRetVal < 0)
     {
@@ -1382,26 +1369,16 @@ void main()
         LOOP_FOREVER();
     }
 
-    /* create and lock the mutex*/
-    lRetVal =  osi_LockObjCreate(&WindKey.LockObj);
+
+    lRetVal =  osi_LockObjCreate(&Wind_Object.LockObj);                     //Create Mutex for Wind data object
     if(lRetVal < 0)
     {
         UART_PRINT("Unable to create  mutex key");
         LOOP_FOREVER();
     }
-    lRetVal =  osi_LockObjLock(&WindKey.LockObj,SL_OS_NO_WAIT);
-    if(lRetVal < 0)
-    {
-        UART_PRINT("Unable to lock  mutex key");
-        LOOP_FOREVER();
-    }
 
 
-
-    //
-    // Start OS Scheduler
-    //
-    osi_start();
+    osi_start();                                                                 // Start OS Scheduler
 
     while (1)
     {
