@@ -134,7 +134,6 @@ unsigned char  g_ucConnectionSSID[SSID_LEN_MAX+1]; //Connection SSID
 unsigned char  g_ucConnectionBSSID[BSSID_LEN_MAX]; //Connection BSSID
 
 static const char pcDigits[] = "0123456789";
-
 unsigned char POST_token[] = "__SL_P_ULD";
 unsigned char GET_token[]  = "__SL_G_ULD";
 int g_iSimplelinkRole = ROLE_INVALID;
