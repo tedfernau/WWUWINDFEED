@@ -1284,10 +1284,11 @@ while(1){
         voltage =  voltage + (Cur_Voltage / 128);
 
 
-        Wind_Speed =  (voltage - (float) 0.395) * WIND_SPEED_FACTOR ;
+
 
     }
 
+    Wind_Speed =  (voltage - (float) 0.395) * WIND_SPEED_FACTOR ;
     Sample_Count = 0;   //reset count
 
 
