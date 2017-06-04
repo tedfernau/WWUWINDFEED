@@ -1034,6 +1034,8 @@ long ConnectToNetwork()
        lRetVal = sl_NetAppStart(SL_NET_APP_HTTP_SERVER_ID);
        ASSERT_ON_ERROR( lRetVal);
 
+
+
        char iCount=0;
        //Read the AP SSID
        memset(ucAPSSID,'\0',AP_SSID_LEN_MAX);
@@ -1043,6 +1045,8 @@ long ConnectToNetwork()
                                               (unsigned char*) ucAPSSID);
         ASSERT_ON_ERROR(lRetVal);
         
+
+
        Report("\n\rDevice is in AP Mode, Please Connect to AP [%s] and"
           "type [mysimplelink.net] in the browser \n\r",ucAPSSID);
        
@@ -1064,6 +1068,14 @@ long ConnectToNetwork()
         //Stop Internal HTTP Server
         lRetVal = sl_NetAppStop(SL_NET_APP_HTTP_SERVER_ID);
         ASSERT_ON_ERROR( lRetVal);
+
+//        //todo: I am trying to set the domain name
+//        unsigned char str[32] = "wwuwindfeed.net";
+//        unsigned char len = strlen((const char *)str);
+//        lRetVal = sl_NetAppSet(SL_NET_APP_DEVICE_CONFIG_ID, NETAPP_SET_GET_DEV_CONF_OPT_DOMAIN_NAME,
+//                len, (unsigned char*)str);
+
+        ASSERT_ON_ERROR(lRetVal);
 
         //Start Internal HTTP Server
         lRetVal = sl_NetAppStart(SL_NET_APP_HTTP_SERVER_ID);
@@ -1227,7 +1239,7 @@ static void WindTask(void *pvParameters )
     long lRetVal = -1;              //for OS error traps
 
 
-    char   step1 ;
+
 
   float voltage;
 
@@ -1289,7 +1301,7 @@ while(1){
 
 
     Wind_Object.fCurrentTemp = (double) Wind_Speed;          //Update Wind speed for HTTP Server Task
-    step1 = (char) Wind_Object.fCurrentTemp;                // test code for viewing wind object format
+
 
 
 
