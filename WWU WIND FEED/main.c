@@ -47,6 +47,8 @@
 // Standard includes
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 // Simplelink includes
 #include "simplelink.h"
@@ -103,8 +105,10 @@
 #define OOB_TASK_PRIORITY               (2)       // higher number is higher priority
 #define WIND_TASK_PRIORITY               (1)
 #define OSI_STACK_SIZE                  (2048)
+#define UART_PRINT         Report
+#define FOREVER            1
 #define NO_OF_SAMPLES       128
-#define WIND_SPEED_FACTOR   10                     //conversion factor for wind speed estimate
+#define WIND_SPEED_FACTOR   39                     //conversion factor for wind speed estimate
 
 /*****************************************************
                     END
@@ -136,6 +140,7 @@ unsigned char  g_ucConnectionBSSID[BSSID_LEN_MAX]; //Connection BSSID
 static const char pcDigits[] = "0123456789";
 unsigned char POST_token[] = "__SL_P_ULD";
 unsigned char GET_token[]  = "__SL_G_ULD";
+static unsigned char GET_token_TEMP[]  = "__SL_G_UTP";              //this is the handle for the token which is polled by javascript
 int g_iSimplelinkRole = ROLE_INVALID;
 signed int g_uiIpAddress = 0;
 unsigned char g_ucSSID[AP_SSID_LEN_MAX];
@@ -146,15 +151,14 @@ unsigned char g_ucSSID[AP_SSID_LEN_MAX];
 /*****************************************************
                                                   //todo 2 Global variables
  *******************************************************/
-static unsigned char GET_token_TEMP[]  = "__SL_G_UTP";              //this is the handle for the token which is polled by javascript
-
 unsigned long Adc_Samples [4096];
 unsigned long Adc_Sample;
-unsigned long Voltage;
-unsigned long Wind_Speed;                                     //  This is the calculated wind speed
+float Cur_Voltage;
+float Voltages [NO_OF_SAMPLES];
+float Wind_Speed;                                     //  This is the calculated wind speed
 
 struct Wind_Struct {                                //This structure holds the shared wind data object and the lock parameter
-    float fCurrentTemp;
+    double fCurrentTemp;
    OsiLockObj_t LockObj;
 } Wind_Object;                                       //there is only 1 instance
 
@@ -705,13 +709,12 @@ void SimpleLinkHttpServerCallback(SlHttpServerEvent_t *pSlHttpServerEvent,      
               }
 
               short sTempLen = itoa(cWind,(char*)ptr);          //convert integer to ASCII
-              ptr[sTempLen++] = ' ';
-              ptr[sTempLen] = 'F';
+
               pSlHttpServerResponse->ResponseData.token_value.len += sTempLen; //adjust frame for size of data
 
             }
 
-            *ptr = '\0';
+           // *ptr = '\0';
 
 
         }
@@ -1185,6 +1188,11 @@ static void WindTask(void *pvParameters )
     long lRetVal = -1;              //for OS error traps
 
 
+    char   step1 ;
+
+  float voltage;
+
+
     //    Initialize
     /******************************************************************/
 
@@ -1201,29 +1209,35 @@ static void WindTask(void *pvParameters )
     /******************************************************************/
 while(1){
 
-    MAP_ADCChannelEnable(ADC_BASE, ADC_CH_0);       // Enable free-running ADC channel each loop
+    MAP_ADCChannelEnable(ADC_BASE, ADC_CH_2);       // Enable free-running ADC channel each loop
 
     while(Sample_Count < NO_OF_SAMPLES + 4){        //read ADC into array
-            if(MAP_ADCFIFOLvlGet(ADC_BASE,ADC_CH_0))
+            if(MAP_ADCFIFOLvlGet(ADC_BASE,ADC_CH_2))
             {
-                Cur_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
+                Cur_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_2);
                 Adc_Samples[Sample_Count++] = Cur_Sample;
             }
         }
 
-        /*
-        if(MAP_ADCFIFOLvlGet(ADC_BASE, ADC_CH_0)){          //I am experimenting with single value vs. windowed sampling
-        Adc_Sample = MAP_ADCFIFORead(ADC_BASE, ADC_CH_0);
-        }
-        */
-
-    MAP_ADCChannelDisable(ADC_BASE, ADC_CH_0);
+    MAP_ADCChannelDisable(ADC_BASE, ADC_CH_2);
 
     Sample_Count = 0;   //reset count
+    voltage = 0;
+
+    while(Sample_Count < NO_OF_SAMPLES)
+    {
+
+       Cur_Voltage =  (((float)((Adc_Samples[4+Sample_Count] >> 2 ) & 0x0FFF))*(float)1.467)/4096;
+
+        Voltages[Sample_Count++] = Cur_Voltage;
+        voltage =  voltage + (Cur_Voltage / 128);
 
 
-    Voltage = (((float)((Adc_Samples[4+Sample_Count] >> 2 ) & 0x0FFF))*1.467)/4096; //currently just pulling 4th sample and manipulating
-    Wind_Speed = (float) (Voltage * WIND_SPEED_FACTOR);
+        Wind_Speed =  (voltage - (float) 0.395) * WIND_SPEED_FACTOR ;
+
+    }
+
+    Sample_Count = 0;   //reset count
 
 
 
@@ -1235,7 +1249,8 @@ while(1){
     }
 
 
-    Wind_Object.fCurrentTemp = Wind_Speed;          //Update Wind speed for HTTP Server Task
+    Wind_Object.fCurrentTemp = (double) Wind_Speed;          //Update Wind speed for HTTP Server Task
+    step1 = (char) Wind_Object.fCurrentTemp;                // test code for viewing wind object format
 
 
 
@@ -1256,10 +1271,12 @@ while(1){
         UART_PRINT("\n\rVoltage is %f\n\r",(((float)((Adc_Samples[4+Sample_Count] >> 2 ) & 0x0FFF))*1.4)/4096);
         Sample_Count++;
     }
+        UART_PRINT("\n\r");
  */
-    UART_PRINT("\n\r");
 
-    osi_Sleep(5000);    // delay for periodic behavior
+
+
+    //osi_Sleep(1000);    // delay for periodic behavior
     }
 
 
