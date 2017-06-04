@@ -102,7 +102,7 @@
 /*****************************************************
                     TEDs defines                              //todo 1  #defines
  *******************************************************/
-#define OOB_TASK_PRIORITY               (2)       // higher number is higher priority
+#define OOB_TASK_PRIORITY               (1)       // higher number is higher priority
 #define WIND_TASK_PRIORITY               (1)
 #define OSI_STACK_SIZE                  (2048)
 #define UART_PRINT         Report
@@ -182,7 +182,7 @@ extern uVectorEntry __vector_table;
 //****************************************************************************
 //                      LOCAL FUNCTION PROTOTYPES
 //****************************************************************************
-
+static long WlanConnect();
 
 //*****************************************************************************
 // Variable related to Connection status
@@ -932,7 +932,46 @@ static long ConfigureSimpleLinkToDefaultState()
 
 
 
+//****************************************************************************
+//
+//! \brief Connecting to a WLAN Accesspoint
+//!
+//!  This function connects to the required AP (SSID_NAME) with Security
+//!  parameters specified in te form of macros at the top of this file
+//!
+//! \param  None
+//!
+//! \return  None
+//!
+//! \warning    If the WLAN connection fails or we don't aquire an IP
+//!            address, It will be stuck in this function forever.
+//
+//****************************************************************************
+static long WlanConnect()
+{
+    SlSecParams_t secParams = {0};
+    long lRetVal = 0;
 
+    secParams.Key = (signed char*)SECURITY_KEY;
+    secParams.KeyLen = strlen(SECURITY_KEY);
+    secParams.Type = SECURITY_TYPE;
+
+    lRetVal = sl_WlanConnect((signed char*)SSID_NAME, strlen(SSID_NAME), 0, &secParams, 0);
+    ASSERT_ON_ERROR(lRetVal);
+
+    // Wait for WLAN Event
+    while((!IS_CONNECTED(g_ulStatus)) || (!IS_IP_ACQUIRED(g_ulStatus)))
+    {
+        // Toggle LEDs to Indicate Connection Progress
+        GPIO_IF_LedOff(MCU_IP_ALLOC_IND);
+        MAP_UtilsDelay(800000);
+        GPIO_IF_LedOn(MCU_IP_ALLOC_IND);
+        MAP_UtilsDelay(800000);
+    }
+
+    return SUCCESS;
+
+}
 //****************************************************************************
 //
 //!    \brief Connects to the Network in AP or STA Mode - If ForceAP Jumper is
@@ -1054,7 +1093,7 @@ long ConnectToNetwork()
 
             Report("Use Smart Config Application to configure the device.\n\r");
             //Connect Using Smart Config
-            lRetVal = SmartConfigConnect();             ///lets change this to wlan connect or something
+            lRetVal = WlanConnect();             ///lets change this to wlan connect or something
             ASSERT_ON_ERROR(lRetVal);
 
             //Waiting for the device to Auto Connect
@@ -1276,7 +1315,7 @@ while(1){
 
 
 
-    //osi_Sleep(1000);    // delay for periodic behavior
+    osi_Sleep(500);    // delay for periodic behavior
     }
 
 
