@@ -5,7 +5,8 @@ WWU Wind Feed was my 2017 senior project in electrical engineering. WWU Wind Fee
 
 The project was to develop an embedded system from concept to prototype, designing and building custom hardware and firmware.
 
-./images/demo.mp4
+https://user-images.githubusercontent.com/7742005/117382242-ee376c80-ae92-11eb-8817-17ec5c702b5a.mp4
+
 
 The demonstration video is also on [youtube](https://www.youtube.com/watch?v=sEgjqADhZPg)
 
@@ -40,7 +41,7 @@ Below I dumped documents for a technical audience to quickly evaluate this proje
 ![dataflow](images/dataflow.JPG)*Dataflow Diagram*
 ![webpage](images/webpage.JPG)*Webpage Design*
 
-## [Thoughts]
+## Thoughts
 
 This project was a great first dive into product design, mixed signal electronics design, PCB design, PCB assembly, debugging and rework, firmware development in C, and project management. The experience revealed deficits in my skills, knowledge, and personality. These revelations have been useful.
 
